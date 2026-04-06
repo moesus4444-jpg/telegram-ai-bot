@@ -8,6 +8,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 # ===== CONFIG =====
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 DEEPSEEK_KEYS = os.getenv("DEEPSEEK_KEYS", "").split(",")
+GROQ_KEY = os.getenv("GROQ_KEY")
 
 ADMINS = [6157906511]
 
@@ -31,34 +32,66 @@ users = load_data("users.json")
 banned = load_data("banned.json")
 
 # ===== AI =====
-def ask_ai(user_id, text):
-    key = DEEPSEEK_KEYS[0]
-
-    if user_id not in memory:
-        memory[user_id] = []
-
-    memory[user_id].append({"role": "user", "content": text})
-
-    url = "https://api.deepseek.com/chat/completions"
-
-    headers = {
-        "Authorization": f"Bearer {key}",
-        "Content-Type": "application/json"
-    }
-
-    data = {
-        "model": "deepseek-chat",
-        "messages": memory[user_id][-10:]
-    }
-
+def ask_deepseek(user_id, text):
     try:
+        key = DEEPSEEK_KEYS[0]
+
+        if user_id not in memory:
+            memory[user_id] = []
+
+        memory[user_id].append({"role": "user", "content": text})
+
+        url = "https://api.deepseek.com/chat/completions"
+
+        headers = {
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json"
+        }
+
+        data = {
+            "model": "deepseek-chat",
+            "messages": memory[user_id][-10:]
+        }
+
         res = requests.post(url, headers=headers, json=data, timeout=15)
-        reply = res.json()["choices"][0]["message"]["content"]
+        result = res.json()
+
+        reply = result["choices"][0]["message"]["content"]
         memory[user_id].append({"role": "assistant", "content": reply})
+
         return reply
+
     except Exception as e:
-        print(e)
-        return "❌ AI مش شغال دلوقتي"
+        print("DeepSeek Error:", e)
+        return None
+
+
+def ask_groq(text):
+    try:
+        url = "https://api.groq.com/openai/v1/chat/completions"
+
+        headers = {
+            "Authorization": f"Bearer {GROQ_KEY}",
+            "Content-Type": "application/json"
+        }
+
+        data = {
+            "model": "llama3-8b-8192",
+            "messages": [
+                {"role": "system", "content": "انت Groq AI ومش DeepSeek واتكلم مصري"},
+                {"role": "user", "content": text}
+            ]
+        }
+
+        res = requests.post(url, headers=headers, json=data, timeout=15)
+        result = res.json()
+
+        return result["choices"][0]["message"]["content"]
+
+    except Exception as e:
+        print("Groq Error:", e)
+        return None
+
 
 # ===== ADMIN PANEL =====
 def admin_panel():
@@ -73,6 +106,7 @@ def admin_panel():
          InlineKeyboardButton("💬 Chat ON/OFF", callback_data="toggle_chat")]
     ])
 
+
 # ===== START =====
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -82,13 +116,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     users.add(uid)
     save_data("users.json", users)
 
-    # 🔥 إشعار كامل للأدمن
+    # 🚨 إشعار الأدمن بكل التفاصيل
     if is_new:
         msg = (
             f"🚨 مستخدم جديد\n\n"
             f"👤 الاسم: {user.first_name}\n"
             f"🆔 ID: {uid}\n"
-            f"🔗 يوزر: @{user.username if user.username else 'None'}\n"
+            f"🔗 Username: @{user.username if user.username else 'None'}\n"
             f"🌍 اللغة: {user.language_code}\n"
             f"🕒 الوقت: {datetime.now()}"
         )
@@ -103,7 +137,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("👑 Admin Panel", reply_markup=admin_panel())
         return
 
-    # 👤 User Welcome
+    # 🎓 Welcome
     await update.message.reply_text(
         f"""
 👋 أهلاً بيك يا {user.first_name}
@@ -114,21 +148,24 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 ━━━━━━━━━━━━━━━
 🤖 البوت جاهز يساعدك في:
-• كتابة كود
-• شرح
-• حل مشاكل
+• كتابة كود  
+• شرح  
+• حل مشاكل  
 
 👇 اضغط:
 /start_bot
 """
     )
 
+
 # ===== START BOT =====
 async def start_bot(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
-        [InlineKeyboardButton("🧠 DeepSeek", callback_data="deepseek")]
+        [InlineKeyboardButton("🧠 DeepSeek", callback_data="deepseek")],
+        [InlineKeyboardButton("⚡ Groq", callback_data="groq")]
     ]
     await update.message.reply_text("اختار AI:", reply_markup=InlineKeyboardMarkup(keyboard))
+
 
 # ===== BUTTONS =====
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -138,9 +175,10 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await q.answer()
     uid = q.from_user.id
 
-    if q.data == "deepseek":
-        context.user_data["ai"] = "deepseek"
-        await q.edit_message_text("✅ تم اختيار DeepSeek\nابعت رسالتك")
+    # اختيار AI
+    if q.data in ["deepseek", "groq"]:
+        context.user_data["ai"] = q.data
+        await q.edit_message_text(f"✅ اخترت {q.data}\nابعت رسالتك")
         return
 
     if uid not in ADMINS:
@@ -161,6 +199,7 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["mode"] = q.data
         await q.edit_message_text("ابعت ID او رسالة")
 
+
 # ===== MESSAGE =====
 async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -168,7 +207,6 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if uid in banned or not bot_enabled:
         return
 
-    # Admin modes
     mode = context.user_data.get("mode")
 
     if mode == "ban":
@@ -195,18 +233,26 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["mode"] = None
         return
 
-    # AI Chat
     if not chat_enabled:
         return
 
     if context.user_data.get("ai") is None:
-        return await update.message.reply_text("⚠️ اكتب /start_bot الاول")
+        return await update.message.reply_text("⚠️ اختار AI الاول")
 
     msg = await update.message.reply_text("⏳ جاري التفكير...")
 
-    reply = ask_ai(uid, update.message.text)
+    text = update.message.text
+
+    if context.user_data["ai"] == "deepseek":
+        reply = ask_deepseek(uid, text) or ask_groq(text)
+    else:
+        reply = ask_groq(text) or ask_deepseek(uid, text)
+
+    if not reply:
+        reply = "❌ كل الأنظمة واقعة 😂"
 
     await msg.edit_text(reply[:4000])
+
 
 # ===== MAIN =====
 def main():
@@ -217,8 +263,9 @@ def main():
     app.add_handler(CallbackQueryHandler(buttons))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle))
 
-    print("🔥 BOT RUNNING...")
+    print("🔥 BOT RUNNING PRO MAX...")
     app.run_polling()
+
 
 if __name__ == "__main__":
     main()
