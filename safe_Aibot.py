@@ -63,7 +63,7 @@ def ask_deepseek(user_id, text):
 
     except Exception as e:
         print("DeepSeek Error:", e)
-        return None  # 🔥 مهم عشان fallback
+        return None
 
 # ===== AI Groq =====
 def ask_groq(text):
@@ -78,14 +78,20 @@ def ask_groq(text):
         data = {
             "model": "llama3-8b-8192",
             "messages": [
-                {"role": "user", "content": text}
+                {
+                    "role": "system",
+                    "content": "You are Groq AI assistant. Never say you are DeepSeek. Speak Arabic and English."
+                },
+                {
+                    "role": "user",
+                    "content": text
+                }
             ]
         }
 
         res = requests.post(url, headers=headers, json=data)
 
-        # 🔥 debug مهم
-        print("GROQ RESPONSE:", res.text)
+        print("GROQ:", res.text)
 
         result = res.json()
         return result["choices"][0]["message"]["content"]
@@ -127,7 +133,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("👑 Admin Panel", reply_markup=admin_panel())
         return
 
-    await update.message.reply_text("👋 أهلاً بيك\nاكتب /start_bot")
+    await update.message.reply_text(
+        "👋 أهلاً بيك في ZNU AI 🤖\n\n"
+        "🎓 طالب في جامعة ZNU\n"
+        "💻 كلية حاسبات و معلومات - AI\n\n"
+        "▶️ اكتب /start_bot"
+    )
 
 # ===== START BOT =====
 async def start_bot(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -145,16 +156,18 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await q.answer()
     uid = q.from_user.id
 
+    # اختيار AI
     if q.data in ["deepseek", "groq"]:
         context.user_data["ai"] = q.data
         await q.edit_message_text(f"✅ اخترت {q.data}\nابعت رسالتك")
         return
 
+    # Admin فقط
     if uid not in ADMINS:
         return
 
     if q.data == "users":
-        await q.edit_message_text(f"👥 Users: {len(users)}", reply_markup=admin_panel())
+        await q.edit_message_text(f"👥 عدد المستخدمين: {len(users)}", reply_markup=admin_panel())
 
     elif q.data == "toggle_bot":
         bot_enabled = not bot_enabled
@@ -166,13 +179,44 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif q.data in ["ban", "unban", "broadcast"]:
         context.user_data["mode"] = q.data
-        await q.edit_message_text("Send ID or Message")
+        await q.edit_message_text("ابعت ID او رسالة")
 
 # ===== MESSAGE =====
 async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
 
     if uid in banned or not bot_enabled:
+        return
+
+    # Admin modes
+    mode = context.user_data.get("mode")
+
+    if mode == "ban":
+        banned.add(int(update.message.text))
+        save_data("banned.json", banned)
+        await update.message.reply_text("🚫 تم الحظر")
+        context.user_data["mode"] = None
+        return
+
+    if mode == "unban":
+        banned.discard(int(update.message.text))
+        save_data("banned.json", banned)
+        await update.message.reply_text("✅ تم فك الحظر")
+        context.user_data["mode"] = None
+        return
+
+    if mode == "broadcast":
+        for u in users:
+            try:
+                await context.bot.send_message(u, update.message.text)
+            except:
+                pass
+        await update.message.reply_text("📢 تم الإرسال")
+        context.user_data["mode"] = None
+        return
+
+    # AI Chat
+    if not chat_enabled:
         return
 
     if context.user_data.get("ai") is None:
@@ -182,23 +226,17 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     text = update.message.text
 
-    # 🔥 اختيار AI
     if context.user_data["ai"] == "deepseek":
         reply = ask_deepseek(uid, text)
-
-        # 🔥 fallback لو وقع
         if not reply:
             reply = ask_groq(text)
-
     else:
         reply = ask_groq(text)
-
-        # 🔥 fallback
         if not reply:
             reply = ask_deepseek(uid, text)
 
     if not reply:
-        reply = "❌ كل الـ AI واقف 😅"
+        reply = "❌ كل الأنظمة واقعة 😂"
 
     await msg.edit_text(reply[:4000])
 
