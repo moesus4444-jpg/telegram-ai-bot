@@ -41,22 +41,26 @@ def ask_deepseek(user_id, text):
 
         memory[user_id].append({"role": "user", "content": text})
 
-        url = "https://api.deepseek.com/chat/completions"
+        res = requests.post(
+            "https://api.deepseek.com/chat/completions",
+            headers={
+                "Authorization": f"Bearer {key}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": "deepseek-chat",
+                "messages": memory[user_id][-10:]
+            },
+            timeout=20
+        )
 
-        headers = {
-            "Authorization": f"Bearer {key}",
-            "Content-Type": "application/json"
-        }
+        data = res.json()
 
-        data = {
-            "model": "deepseek-chat",
-            "messages": memory[user_id][-10:]
-        }
+        if "choices" not in data:
+            print("DeepSeek BAD:", data)
+            return None
 
-        res = requests.post(url, headers=headers, json=data, timeout=15)
-        result = res.json()
-
-        reply = result["choices"][0]["message"]["content"]
+        reply = data["choices"][0]["message"]["content"]
         memory[user_id].append({"role": "assistant", "content": reply})
 
         return reply
@@ -68,25 +72,29 @@ def ask_deepseek(user_id, text):
 
 def ask_groq(text):
     try:
-        url = "https://api.groq.com/openai/v1/chat/completions"
+        res = requests.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {GROQ_KEY}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": "llama3-8b-8192",
+                "messages": [
+                    {"role": "system", "content": "انت Groq AI ومش DeepSeek واتكلم مصري"},
+                    {"role": "user", "content": text}
+                ]
+            },
+            timeout=20
+        )
 
-        headers = {
-            "Authorization": f"Bearer {GROQ_KEY}",
-            "Content-Type": "application/json"
-        }
+        data = res.json()
 
-        data = {
-            "model": "llama3-8b-8192",
-            "messages": [
-                {"role": "system", "content": "انت Groq AI ومش DeepSeek واتكلم مصري"},
-                {"role": "user", "content": text}
-            ]
-        }
+        if "choices" not in data:
+            print("Groq BAD:", data)
+            return None
 
-        res = requests.post(url, headers=headers, json=data, timeout=15)
-        result = res.json()
-
-        return result["choices"][0]["message"]["content"]
+        return data["choices"][0]["message"]["content"]
 
     except Exception as e:
         print("Groq Error:", e)
@@ -116,7 +124,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     users.add(uid)
     save_data("users.json", users)
 
-    # 🚨 إشعار الأدمن بكل التفاصيل
     if is_new:
         msg = (
             f"🚨 مستخدم جديد\n\n"
@@ -132,12 +139,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except:
                 pass
 
-    # 👑 Admin
     if uid in ADMINS:
         await update.message.reply_text("👑 Admin Panel", reply_markup=admin_panel())
         return
 
-    # 🎓 Welcome
     await update.message.reply_text(
         f"""
 👋 أهلاً بيك يا {user.first_name}
@@ -175,7 +180,6 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await q.answer()
     uid = q.from_user.id
 
-    # اختيار AI
     if q.data in ["deepseek", "groq"]:
         context.user_data["ai"] = q.data
         await q.edit_message_text(f"✅ اخترت {q.data}\nابعت رسالتك")
@@ -249,9 +253,12 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply = ask_groq(text) or ask_deepseek(uid, text)
 
     if not reply:
-        reply = "❌ كل الأنظمة واقعة 😂"
+        reply = "❌ البوت عليه ضغط حاول وقت تاني"
 
-    await msg.edit_text(reply[:4000])
+    try:
+        await msg.edit_text(reply[:4000])
+    except:
+        await update.message.reply_text(reply[:4000])
 
 
 # ===== MAIN =====
