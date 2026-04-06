@@ -8,7 +8,8 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler, Mess
 import os
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-DEEPSEEK_KEYS = os.getenv("DEEPSEEK_KEYS").split(",")
+DEEPSEEK_KEYS = os.getenv("DEEPSEEK_KEYS", "").split(",")
+API_KEY = DEEPSEEK_KEYS[0] if DEEPSEEK_KEYS else ""
 ADMINS = [6157906511]
 
 bot_enabled = True
@@ -31,36 +32,35 @@ banned = set()
 memory = {}
 
 # ================= AI =================
-def ask_ai(user_id, text):
-    url = "https://api.deepseek.com/chat/completions"
+def ask_ai(user_message):
+    url = "https://api.deepseek.com/v1/chat/completions"
 
-    if user_id not in memory:
-        memory[user_id] = []
+    headers = {
+        "Authorization": f"Bearer {API_KEY}",
+        "Content-Type": "application/json"
+    }
 
-    memory[user_id].append({"role": "user", "content": text})
+    data = {
+        "model": "deepseek-chat",
+        "messages": [
+            {"role": "user", "content": user_message}
+        ]
+    }
 
-    for key in DEEPSEEK_KEYS:
-        try:
-            headers = {
-                "Authorization": f"Bearer {key}",
-                "Content-Type": "application/json"
-            }
+    try:
+        response = requests.post(url, headers=headers, json=data)
 
-            data = {
-                "model": "deepseek-chat",
-                "messages": memory[user_id][-10:]
-            }
+        print("STATUS:", response.status_code)
+        print("TEXT:", response.text)
 
-            res = requests.post(url, headers=headers, json=data)
-            reply = res.json()["choices"][0]["message"]["content"]
+        if response.status_code == 200:
+            return response.json()["choices"][0]["message"]["content"]
+        else:
+            return "AI مش شغال حالياً ❌"
 
-            memory[user_id].append({"role": "assistant", "content": reply})
-            return reply
-
-        except:
-            continue
-
-    return "⚠️ AI مش شغال حالياً"
+    except Exception as e:
+        print("ERROR:", e)
+        return "حصل خطأ ❌"
 
 # ================= KEYBOARDS =================
 def ai_keyboard():
