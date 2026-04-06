@@ -53,7 +53,7 @@ def ask_deepseek(user_id, text):
             "messages": memory[user_id][-10:]
         }
 
-        res = requests.post(url, headers=headers, json=data)
+        res = requests.post(url, headers=headers, json=data, timeout=15)
         result = res.json()
 
         reply = result["choices"][0]["message"]["content"]
@@ -80,17 +80,25 @@ def ask_groq(text):
             "messages": [
                 {
                     "role": "system",
-                    "content": "You are Groq AI assistant. Never say you are DeepSeek. Speak Arabic and English."
+                    "content": (
+                        "You are Groq AI assistant.\n"
+                        "You are NOT DeepSeek.\n"
+                        "Never say you are DeepSeek.\n"
+                        "If asked who you are say: I am Groq AI.\n"
+                        "Speak Egyptian Arabic casually."
+                    )
                 },
                 {
                     "role": "user",
                     "content": text
                 }
-            ]
+            ],
+            "temperature": 0.7
         }
 
-        res = requests.post(url, headers=headers, json=data)
+        res = requests.post(url, headers=headers, json=data, timeout=15)
 
+        # debug
         print("GROQ:", res.text)
 
         result = res.json()
@@ -156,13 +164,11 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await q.answer()
     uid = q.from_user.id
 
-    # اختيار AI
     if q.data in ["deepseek", "groq"]:
         context.user_data["ai"] = q.data
         await q.edit_message_text(f"✅ اخترت {q.data}\nابعت رسالتك")
         return
 
-    # Admin فقط
     if uid not in ADMINS:
         return
 
@@ -215,7 +221,6 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["mode"] = None
         return
 
-    # AI Chat
     if not chat_enabled:
         return
 
@@ -227,13 +232,9 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
 
     if context.user_data["ai"] == "deepseek":
-        reply = ask_deepseek(uid, text)
-        if not reply:
-            reply = ask_groq(text)
+        reply = ask_deepseek(uid, text) or ask_groq(text)
     else:
-        reply = ask_groq(text)
-        if not reply:
-            reply = ask_deepseek(uid, text)
+        reply = ask_groq(text) or ask_deepseek(uid, text)
 
     if not reply:
         reply = "❌ كل الأنظمة واقعة 😂"
