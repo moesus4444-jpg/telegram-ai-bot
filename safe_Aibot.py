@@ -101,6 +101,33 @@ def ask_groq(text):
         return None
 
 
+# ===== FORMAT =====
+def format_code(text):
+    if "def " in text or "import " in text or "class " in text:
+        return f"```python\n{text}\n```"
+    return text
+
+
+async def send_long_message(update, msg, reply):
+    reply = format_code(reply)
+
+    if len(reply) <= 4000:
+        try:
+            await msg.edit_text(reply, parse_mode="Markdown")
+        except:
+            await update.message.reply_text(reply, parse_mode="Markdown")
+    else:
+        parts = [reply[i:i+4000] for i in range(0, len(reply), 4000)]
+
+        try:
+            await msg.edit_text(parts[0], parse_mode="Markdown")
+        except:
+            await update.message.reply_text(parts[0], parse_mode="Markdown")
+
+        for part in parts[1:]:
+            await update.message.reply_text(part, parse_mode="Markdown")
+
+
 # ===== ADMIN PANEL =====
 def admin_panel():
     return InlineKeyboardMarkup([
@@ -253,12 +280,9 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply = ask_groq(text) or ask_deepseek(uid, text)
 
     if not reply:
-        reply = "❌ البوت عليه ضغط حاول وقت تاني"
+        reply = "❌ كل الأنظمة واقعة 😂"
 
-    try:
-        await msg.edit_text(reply[:4000])
-    except:
-        await update.message.reply_text(reply[:4000])
+    await send_long_message(update, msg, reply)
 
 
 # ===== MAIN =====
