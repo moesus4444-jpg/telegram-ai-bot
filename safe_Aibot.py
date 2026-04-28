@@ -1,6 +1,6 @@
 import json
-import requests
 import os
+import aiohttp
 from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
@@ -9,6 +9,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 DEEPSEEK_KEYS = os.getenv("DEEPSEEK_KEYS", "").split(",")
 GROQ_KEY = os.getenv("GROQ_KEY")
+MISTRAL_KEY = os.getenv("MISTRAL_KEY")
 
 ADMINS = [6157906511]
 
@@ -32,7 +33,7 @@ users = load_data("users.json")
 banned = load_data("banned.json")
 
 # ===== AI =====
-def ask_deepseek(user_id, text):
+async def ask_deepseek(user_id, text):
     try:
         key = DEEPSEEK_KEYS[0]
 
@@ -41,23 +42,21 @@ def ask_deepseek(user_id, text):
 
         memory[user_id].append({"role": "user", "content": text})
 
-        res = requests.post(
-            "https://api.deepseek.com/chat/completions",
-            headers={
-                "Authorization": f"Bearer {key}",
-                "Content-Type": "application/json"
-            },
-            json={
-                "model": "deepseek-chat",
-                "messages": memory[user_id][-10:]
-            },
-            timeout=20
-        )
-
-        data = res.json()
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                "https://api.deepseek.com/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {key}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "model": "deepseek-chat",
+                    "messages": memory[user_id][-10:]
+                }
+            ) as res:
+                data = await res.json()
 
         if "choices" not in data:
-            print("DeepSeek BAD:", data)
             return None
 
         reply = data["choices"][0]["message"]["content"]
@@ -65,39 +64,56 @@ def ask_deepseek(user_id, text):
 
         return reply
 
-    except Exception as e:
-        print("DeepSeek Error:", e)
+    except:
         return None
 
 
-def ask_groq(text):
+async def ask_groq(text):
     try:
-        res = requests.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {GROQ_KEY}",
-                "Content-Type": "application/json"
-            },
-            json={
-                "model": "llama3-8b-8192",
-                "messages": [
-                    {"role": "system", "content": "انت Groq AI ومش DeepSeek واتكلم مصري"},
-                    {"role": "user", "content": text}
-                ]
-            },
-            timeout=20
-        )
-
-        data = res.json()
-
-        if "choices" not in data:
-            print("Groq BAD:", data)
-            return None
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {GROQ_KEY}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "model": "llama3-8b-8192",
+                    "messages": [
+                        {"role": "system", "content": "اتكلم مصري"},
+                        {"role": "user", "content": text}
+                    ]
+                }
+            ) as res:
+                data = await res.json()
 
         return data["choices"][0]["message"]["content"]
 
-    except Exception as e:
-        print("Groq Error:", e)
+    except:
+        return None
+
+
+async def ask_mistral(text):
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                "https://api.mistral.ai/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {MISTRAL_KEY}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "model": "mistral-small",
+                    "messages": [
+                        {"role": "user", "content": text}
+                    ]
+                }
+            ) as res:
+                data = await res.json()
+
+        return data["choices"][0]["message"]["content"]
+
+    except:
         return None
 
 
@@ -110,22 +126,12 @@ def format_code(text):
 
 async def send_long_message(update, msg, reply):
     reply = format_code(reply)
+    parts = [reply[i:i+3500] for i in range(0, len(reply), 3500)]
 
-    if len(reply) <= 4000:
-        try:
-            await msg.edit_text(reply, parse_mode="Markdown")
-        except:
-            await update.message.reply_text(reply, parse_mode="Markdown")
-    else:
-        parts = [reply[i:i+4000] for i in range(0, len(reply), 4000)]
+    await msg.edit_text(parts[0], parse_mode="Markdown")
 
-        try:
-            await msg.edit_text(parts[0], parse_mode="Markdown")
-        except:
-            await update.message.reply_text(parts[0], parse_mode="Markdown")
-
-        for part in parts[1:]:
-            await update.message.reply_text(part, parse_mode="Markdown")
+    for part in parts[1:]:
+        await update.message.reply_text(part, parse_mode="Markdown")
 
 
 # ===== ADMIN PANEL =====
@@ -152,14 +158,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     save_data("users.json", users)
 
     if is_new:
-        msg = (
-            f"🚨 مستخدم جديد\n\n"
-            f"👤 الاسم: {user.first_name}\n"
-            f"🆔 ID: {uid}\n"
-            f"🔗 Username: @{user.username if user.username else 'None'}\n"
-            f"🌍 اللغة: {user.language_code}\n"
-            f"🕒 الوقت: {datetime.now()}"
-        )
+        msg = f"🚨 مستخدم جديد\n\n👤 {user.first_name}\n🆔 {uid}"
         for admin in ADMINS:
             try:
                 await context.bot.send_message(admin, msg)
@@ -170,31 +169,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("👑 Admin Panel", reply_markup=admin_panel())
         return
 
-    await update.message.reply_text(
-        f"""
-👋 أهلاً بيك يا {user.first_name}
-
-🎓 أنا يوسف محمد عبدالماجد  
-💻 طالب في جامعة ZNU  
-🤖 كلية حاسبات و معلومات - قسم الذكاء الاصطناعي  
-
-━━━━━━━━━━━━━━━
-🤖 البوت جاهز يساعدك في:
-• كتابة كود  
-• شرح  
-• حل مشاكل  
-
-👇 اضغط:
-/start_bot
-"""
-    )
+    await update.message.reply_text("👋 أهلاً بيك\nاكتب /start_bot")
 
 
 # ===== START BOT =====
 async def start_bot(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton("🧠 DeepSeek", callback_data="deepseek")],
-        [InlineKeyboardButton("⚡ Groq", callback_data="groq")]
+        [InlineKeyboardButton("⚡ Groq", callback_data="groq")],
+        [InlineKeyboardButton("🔥 Mistral", callback_data="mistral")]
     ]
     await update.message.reply_text("اختار AI:", reply_markup=InlineKeyboardMarkup(keyboard))
 
@@ -207,24 +190,24 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await q.answer()
     uid = q.from_user.id
 
-    if q.data in ["deepseek", "groq"]:
+    if q.data in ["deepseek", "groq", "mistral"]:
         context.user_data["ai"] = q.data
-        await q.edit_message_text(f"✅ اخترت {q.data}\nابعت رسالتك")
+        await q.edit_message_text(f"✅ اخترت {q.data}")
         return
 
     if uid not in ADMINS:
         return
 
     if q.data == "users":
-        await q.edit_message_text(f"👥 عدد المستخدمين: {len(users)}", reply_markup=admin_panel())
+        await q.edit_message_text(f"👥 {len(users)}", reply_markup=admin_panel())
 
     elif q.data == "toggle_bot":
         bot_enabled = not bot_enabled
-        await q.edit_message_text(f"Bot: {'ON' if bot_enabled else 'OFF'}", reply_markup=admin_panel())
+        await q.edit_message_text(f"Bot: {bot_enabled}", reply_markup=admin_panel())
 
     elif q.data == "toggle_chat":
         chat_enabled = not chat_enabled
-        await q.edit_message_text(f"Chat: {'ON' if chat_enabled else 'OFF'}", reply_markup=admin_panel())
+        await q.edit_message_text(f"Chat: {chat_enabled}", reply_markup=admin_panel())
 
     elif q.data in ["ban", "unban", "broadcast"]:
         context.user_data["mode"] = q.data
@@ -267,34 +250,52 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not chat_enabled:
         return
 
-    if context.user_data.get("ai") is None:
-        return await update.message.reply_text("⚠️ اختار AI الاول")
+    ai = context.user_data.get("ai")
+    if not ai:
+        return await update.message.reply_text("اختار AI الاول")
 
-    msg = await update.message.reply_text("⏳ جاري التفكير...")
+    msg = await update.message.reply_text("⏳ بفكر...")
 
     text = update.message.text
 
-    if context.user_data["ai"] == "deepseek":
-        reply = ask_deepseek(uid, text) or ask_groq(text)
+    if ai == "deepseek":
+        reply = await ask_deepseek(uid, text)
+    elif ai == "groq":
+        reply = await ask_groq(text)
+    elif ai == "mistral":
+        reply = await ask_mistral(text)
     else:
-        reply = ask_groq(text) or ask_deepseek(uid, text)
+        reply = "❌ خطأ"
 
     if not reply:
-        reply = "❌ كل الأنظمة واقعة 😂"
+        reply = "❌ AI مش بيرد حالياً"
 
     await send_long_message(update, msg, reply)
 
 
+# ===== PHOTO =====
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    photo = update.message.photo[-1]
+    file = await photo.get_file()
+
+    os.makedirs("photos", exist_ok=True)
+    path = f"photos/{update.effective_user.id}.jpg"
+
+    await file.download_to_drive(path)
+    await update.message.reply_text("📸 الصورة اتحفظت")
+
+
 # ===== MAIN =====
 def main():
-    app = Application.builder().token(BOT_TOKEN).build()
+    app = Application.builder().token(BOT_TOKEN).concurrent_updates(True).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("start_bot", start_bot))
     app.add_handler(CallbackQueryHandler(buttons))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle))
+    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
 
-    print("🔥 BOT RUNNING PRO MAX...")
+    print("🔥 BOT RUNNING...")
     app.run_polling()
 
 
