@@ -7,10 +7,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 # ===== CONFIG =====
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 DEEPSEEK_KEY = os.getenv("DEEPSEEK_KEYS")
-GROQ_KEY = os.getenv("GROQ_KEY")
 MISTRAL_KEY = os.getenv("MISTRAL_KEY")
-
-ADMINS = [6157906511]
 
 memory = {}
 
@@ -25,40 +22,20 @@ def ask_deepseek(user_id, text):
         res = requests.post(
             "https://api.deepseek.com/chat/completions",
             headers={"Authorization": f"Bearer {DEEPSEEK_KEY}"},
-            json={"model": "deepseek-chat", "messages": memory[user_id][-10:]},
+            json={
+                "model": "deepseek-chat",
+                "messages": memory[user_id][-10:]
+            },
             timeout=15
         )
 
         data = res.json()
         print("DeepSeek:", data)
 
-        reply = data["choices"][0]["message"]["content"]
-        memory[user_id].append({"role": "assistant", "content": reply})
+        return data["choices"][0]["message"]["content"]
 
-        return reply
     except Exception as e:
         print("DeepSeek Error:", e)
-        return None
-
-
-def ask_groq(text):
-    try:
-        res = requests.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers={"Authorization": f"Bearer {GROQ_KEY}"},
-            json={
-                "model": "llama3-8b-8192",
-                "messages": [{"role": "user", "content": text}]
-            },
-            timeout=15
-        )
-
-        data = res.json()
-        print("Groq:", data)
-
-        return data["choices"][0]["message"]["content"]
-    except Exception as e:
-        print("Groq Error:", e)
         return None
 
 
@@ -78,6 +55,7 @@ def ask_mistral(text):
         print("Mistral:", data)
 
         return data["choices"][0]["message"]["content"]
+
     except Exception as e:
         print("Mistral Error:", e)
         return None
@@ -91,7 +69,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def start_bot(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton("DeepSeek", callback_data="deepseek")],
-        [InlineKeyboardButton("Groq", callback_data="groq")],
         [InlineKeyboardButton("Mistral", callback_data="mistral")]
     ]
     await update.message.reply_text("اختار AI:", reply_markup=InlineKeyboardMarkup(keyboard))
@@ -117,8 +94,6 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if ai == "deepseek":
         reply = ask_deepseek(update.effective_user.id, text)
-    elif ai == "groq":
-        reply = ask_groq(text)
     elif ai == "mistral":
         reply = ask_mistral(text)
     else:
@@ -128,6 +103,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply = "❌ AI مش بيرد (check logs)"
 
     await msg.edit_text(reply)
+
 
 # ===== MAIN =====
 def main():
