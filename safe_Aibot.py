@@ -1,8 +1,11 @@
 import os
+import json
 import requests
+from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 
+# ===== CONFIG =====
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 DEEPSEEK_KEY = os.getenv("DEEPSEEK_KEYS")
 MISTRAL_KEY = os.getenv("MISTRAL_KEY")
@@ -17,7 +20,7 @@ user_ai = {}
 bot_enabled = True
 chat_enabled = True
 
-# ===== FIX CODE FORMAT =====
+# ===== FORMAT FIX =====
 def format_code(text):
     if any(k in text for k in ["def ", "import ", "class "]):
         return f"<pre>{text}</pre>"
@@ -47,6 +50,7 @@ def ask_deepseek(uid, text):
             return f"❌ {data['error']}"
 
         reply = data["choices"][0]["message"]["content"]
+
         memory[uid] = mem + [{"role": "assistant", "content": reply}]
         return reply
 
@@ -74,6 +78,7 @@ def ask_mistral(uid, text):
             return f"❌ {data['error']}"
 
         reply = data["choices"][0]["message"]["content"]
+
         memory[uid] = mem + [{"role": "assistant", "content": reply}]
         return reply
 
@@ -100,9 +105,11 @@ def admin_panel():
 # ===== START =====
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    users.add(user.id)
+    uid = user.id
 
-    if user.id in ADMINS:
+    users.add(uid)
+
+    if uid in ADMINS:
         await update.message.reply_text("👑 Admin Panel", reply_markup=admin_panel())
         return
 
@@ -110,9 +117,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 👋 أهلاً بيك يا {user.first_name}
 
 👨‍💻 يوسف محمد عبدالماجد  
-🎓 جامعة ZNU - ذكاء اصطناعي  
+🎓 طالب في جامعة ZNU  
+💻 كلية حاسبات و معلومات  
+🤖 قسم الذكاء الاصطناعي  
 
-👇 /start_bot
+━━━━━━━━━━━━━━━
+👇 اضغط:
+/start_bot
 """)
 
 # ===== START BOT =====
@@ -129,7 +140,7 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if q.data in ["deepseek", "mistral"]:
         user_ai[uid] = q.data
-        await q.edit_message_text(f"✅ اخترت {q.data}")
+        await q.edit_message_text(f"✅ اخترت {q.data}\nابعت رسالتك")
         return
 
     if uid not in ADMINS:
@@ -140,11 +151,15 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif q.data == "toggle_bot":
         bot_enabled = not bot_enabled
-        await q.edit_message_text(f"Bot: {bot_enabled}", reply_markup=admin_panel())
+        await q.edit_message_text(f"Bot: {'ON' if bot_enabled else 'OFF'}", reply_markup=admin_panel())
 
     elif q.data == "toggle_chat":
         chat_enabled = not chat_enabled
-        await q.edit_message_text(f"Chat: {chat_enabled}", reply_markup=admin_panel())
+        await q.edit_message_text(f"Chat: {'ON' if chat_enabled else 'OFF'}", reply_markup=admin_panel())
+
+    elif q.data in ["ban", "unban", "broadcast"]:
+        context.user_data["mode"] = q.data
+        await q.edit_message_text("ابعت ID او رسالة")
 
 # ===== HANDLE =====
 async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -153,14 +168,39 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if uid in banned or not bot_enabled:
         return
 
+    mode = context.user_data.get("mode")
+
+    if mode == "ban":
+        banned.add(int(update.message.text))
+        await update.message.reply_text("🚫 تم")
+        context.user_data["mode"] = None
+        return
+
+    if mode == "unban":
+        banned.discard(int(update.message.text))
+        await update.message.reply_text("✅ تم")
+        context.user_data["mode"] = None
+        return
+
+    if mode == "broadcast":
+        for u in users:
+            try:
+                await context.bot.send_message(u, update.message.text)
+            except:
+                pass
+        await update.message.reply_text("📢 تم")
+        context.user_data["mode"] = None
+        return
+
     if not chat_enabled:
         return
 
     ai = user_ai.get(uid)
-    if not ai:
-        return await update.message.reply_text("اختار AI /start_bot")
 
-    msg = await update.message.reply_text("⏳")
+    if not ai:
+        return await update.message.reply_text("⚠️ اختار AI الأول /start_bot")
+
+    msg = await update.message.reply_text("⏳ جاري التفكير...")
 
     text = update.message.text
 
@@ -182,7 +222,7 @@ def main():
     app.add_handler(CallbackQueryHandler(buttons))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle))
 
-    print("🔥 FINAL BOT RUNNING...")
+    print("🔥 BOT RUNNING FIXED...")
     app.run_polling()
 
 if __name__ == "__main__":
