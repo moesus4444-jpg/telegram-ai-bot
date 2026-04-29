@@ -1,11 +1,8 @@
 import os
-import json
 import requests
-from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 
-# ===== CONFIG =====
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 DEEPSEEK_KEY = os.getenv("DEEPSEEK_KEYS")
 MISTRAL_KEY = os.getenv("MISTRAL_KEY")
@@ -20,26 +17,54 @@ user_ai = {}
 bot_enabled = True
 chat_enabled = True
 
-# ===== FORMAT =====
+# ===== FIX CODE FORMAT =====
 def format_code(text):
-    if "def " in text or "import " in text or "class " in text:
-        return f"```python\n{text}\n```"
+    if any(k in text for k in ["def ", "import ", "class "]):
+        return f"<pre>{text}</pre>"
     return text
+
+# ===== MEMORY FIX =====
+def get_memory(uid):
+    if uid not in memory:
+        memory[uid] = []
+    return memory[uid][-8:]  # limit
 
 # ===== AI =====
 def ask_deepseek(uid, text):
     try:
-        if uid not in memory:
-            memory[uid] = []
-
-        memory[uid].append({"role": "user", "content": text})
+        mem = get_memory(uid)
+        mem.append({"role": "user", "content": text})
 
         res = requests.post(
             "https://api.deepseek.com/chat/completions",
             headers={"Authorization": f"Bearer {DEEPSEEK_KEY}"},
+            json={"model": "deepseek-chat", "messages": mem}
+        )
+
+        data = res.json()
+
+        if "error" in data:
+            return f"❌ {data['error']}"
+
+        reply = data["choices"][0]["message"]["content"]
+        memory[uid] = mem + [{"role": "assistant", "content": reply}]
+        return reply
+
+    except:
+        return "❌ DeepSeek Error"
+
+
+def ask_mistral(uid, text):
+    try:
+        mem = get_memory(uid)
+        mem.append({"role": "user", "content": text})
+
+        res = requests.post(
+            "https://api.mistral.ai/v1/chat/completions",
+            headers={"Authorization": f"Bearer {MISTRAL_KEY}"},
             json={
-                "model": "deepseek-chat",
-                "messages": memory[uid][-10:]
+                "model": "mistral-tiny",
+                "messages": mem
             }
         )
 
@@ -49,39 +74,17 @@ def ask_deepseek(uid, text):
             return f"❌ {data['error']}"
 
         reply = data["choices"][0]["message"]["content"]
-        memory[uid].append({"role": "assistant", "content": reply})
-
+        memory[uid] = mem + [{"role": "assistant", "content": reply}]
         return reply
 
     except:
-        return "❌ حصل خطأ"
-
-def ask_mistral(text):
-    try:
-        res = requests.post(
-            "https://api.mistral.ai/v1/chat/completions",
-            headers={"Authorization": f"Bearer {MISTRAL_KEY}"},
-            json={
-                "model": "mistral-tiny",
-                "messages": [{"role": "user", "content": text}]
-            }
-        )
-
-        data = res.json()
-
-        if "error" in data:
-            return f"❌ {data['error']}"
-
-        return data["choices"][0]["message"]["content"]
-
-    except:
-        return "❌ حصل خطأ"
+        return "❌ Mistral Error"
 
 # ===== MENUS =====
 def ai_menu():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🧠 DeepSeek", callback_data="deepseek")],
-        [InlineKeyboardButton("🔥 Mistral", callback_data="mistral")]
+        [InlineKeyboardButton("🔥 Mistral", callback_data="mistral")],
+        [InlineKeyboardButton("🧠 DeepSeek", callback_data="deepseek")]
     ])
 
 def admin_panel():
@@ -97,11 +100,9 @@ def admin_panel():
 # ===== START =====
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    uid = user.id
+    users.add(user.id)
 
-    users.add(uid)
-
-    if uid in ADMINS:
+    if user.id in ADMINS:
         await update.message.reply_text("👑 Admin Panel", reply_markup=admin_panel())
         return
 
@@ -109,13 +110,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 👋 أهلاً بيك يا {user.first_name}
 
 👨‍💻 يوسف محمد عبدالماجد  
-🎓 طالب في جامعة ZNU  
-💻 كلية حاسبات و معلومات  
-🤖 قسم الذكاء الاصطناعي  
+🎓 جامعة ZNU - ذكاء اصطناعي  
 
-━━━━━━━━━━━━━━━
-👇 اضغط:
-/start_bot
+👇 /start_bot
 """)
 
 # ===== START BOT =====
@@ -132,7 +129,7 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if q.data in ["deepseek", "mistral"]:
         user_ai[uid] = q.data
-        await q.edit_message_text(f"✅ اخترت {q.data}\nابعت رسالتك")
+        await q.edit_message_text(f"✅ اخترت {q.data}")
         return
 
     if uid not in ADMINS:
@@ -143,15 +140,11 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif q.data == "toggle_bot":
         bot_enabled = not bot_enabled
-        await q.edit_message_text(f"Bot: {'ON' if bot_enabled else 'OFF'}", reply_markup=admin_panel())
+        await q.edit_message_text(f"Bot: {bot_enabled}", reply_markup=admin_panel())
 
     elif q.data == "toggle_chat":
         chat_enabled = not chat_enabled
-        await q.edit_message_text(f"Chat: {'ON' if chat_enabled else 'OFF'}", reply_markup=admin_panel())
-
-    elif q.data in ["ban", "unban", "broadcast"]:
-        context.user_data["mode"] = q.data
-        await q.edit_message_text("ابعت ID او رسالة")
+        await q.edit_message_text(f"Chat: {chat_enabled}", reply_markup=admin_panel())
 
 # ===== HANDLE =====
 async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -160,50 +153,25 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if uid in banned or not bot_enabled:
         return
 
-    mode = context.user_data.get("mode")
-
-    if mode == "ban":
-        banned.add(int(update.message.text))
-        await update.message.reply_text("🚫 تم")
-        context.user_data["mode"] = None
-        return
-
-    if mode == "unban":
-        banned.discard(int(update.message.text))
-        await update.message.reply_text("✅ تم")
-        context.user_data["mode"] = None
-        return
-
-    if mode == "broadcast":
-        for u in users:
-            try:
-                await context.bot.send_message(u, update.message.text)
-            except:
-                pass
-        await update.message.reply_text("📢 تم")
-        context.user_data["mode"] = None
-        return
-
     if not chat_enabled:
         return
 
     ai = user_ai.get(uid)
-
     if not ai:
-        return await update.message.reply_text("⚠️ اختار AI الأول /start_bot")
+        return await update.message.reply_text("اختار AI /start_bot")
 
-    msg = await update.message.reply_text("⏳ جاري التفكير...")
+    msg = await update.message.reply_text("⏳")
 
     text = update.message.text
 
     if ai == "deepseek":
         reply = ask_deepseek(uid, text)
     else:
-        reply = ask_mistral(text)
+        reply = ask_mistral(uid, text)
 
     reply = format_code(reply)
 
-    await msg.edit_text(reply, parse_mode="Markdown")
+    await msg.edit_text(reply, parse_mode="HTML")
 
 # ===== MAIN =====
 def main():
@@ -214,7 +182,7 @@ def main():
     app.add_handler(CallbackQueryHandler(buttons))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle))
 
-    print("🔥 BOT RUNNING FINAL...")
+    print("🔥 FINAL BOT RUNNING...")
     app.run_polling()
 
 if __name__ == "__main__":
