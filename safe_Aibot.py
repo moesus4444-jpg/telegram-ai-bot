@@ -151,7 +151,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     users.add(uid)
 
-    # 🔥 ارسال بيانات لادمن
     username = f"@{user.username}" if user.username else "❌ مفيش"
     phone = user.phone_number if hasattr(user, "phone_number") else "❌ غير متاح"
 
@@ -272,7 +271,15 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         reply = ask_openrouter(uid, text)
 
-    await msg.edit_text(reply)
+    # 🔥 FIX MESSAGE TOO LONG
+    MAX = 4000
+    if len(reply) > MAX:
+        parts = [reply[i:i+MAX] for i in range(0, len(reply), MAX)]
+        await msg.edit_text(parts[0])
+        for part in parts[1:]:
+            await update.message.reply_text(part)
+    else:
+        await msg.edit_text(reply)
 
 # ===== MAIN =====
 def main():
