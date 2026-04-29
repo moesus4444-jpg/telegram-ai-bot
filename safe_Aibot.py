@@ -20,12 +20,6 @@ user_ai = {}
 bot_enabled = True
 chat_enabled = True
 
-# ===== FORMAT FIX =====
-def format_code(text):
-    if any(k in text for k in ["def ", "import ", "class "]):
-        return f"<pre>{text}</pre>"
-    return text
-
 # ===== MEMORY FIX =====
 def get_memory(uid):
     if uid not in memory:
@@ -209,9 +203,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         reply = ask_mistral(uid, text)
 
-    reply = format_code(reply)
-
-    await msg.edit_text(reply, parse_mode="HTML")
+    await msg.edit_text(reply)
 
 # ===== MAIN =====
 def main():
