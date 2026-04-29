@@ -1,10 +1,7 @@
 import os
 import json
-import time
-import aiohttp
+import requests
 from datetime import datetime
-from collections import defaultdict, deque
-
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 
@@ -14,83 +11,75 @@ DEEPSEEK_KEY = os.getenv("DEEPSEEK_KEYS")
 MISTRAL_KEY = os.getenv("MISTRAL_KEY")
 
 ADMINS = [6157906511]
-BOT_NAME = "🔥 Youssef AI Bot"
 
-# ===== LIMITS =====
-MAX_HISTORY = 10
-memory = defaultdict(lambda: deque(maxlen=MAX_HISTORY))
+users = set()
+banned = set()
+memory = {}
 user_ai = {}
 
-# ===== STORAGE =====
-def load(file):
-    try:
-        with open(file) as f:
-            return set(json.load(f))
-    except:
-        return set()
-
-def save(file, data):
-    with open(file, "w") as f:
-        json.dump(list(data), f)
-
-users = load("users.json")
-banned = load("banned.json")
-
 # ===== AI =====
-async def ask_deepseek(uid, text):
-    memory[uid].append({"role": "user", "content": text})
+def ask_deepseek(uid, text):
+    try:
+        if uid not in memory:
+            memory[uid] = []
 
-    async with aiohttp.ClientSession() as session:
-        async with session.post(
+        memory[uid].append({"role": "user", "content": text})
+
+        res = requests.post(
             "https://api.deepseek.com/chat/completions",
             headers={"Authorization": f"Bearer {DEEPSEEK_KEY}"},
             json={
                 "model": "deepseek-chat",
-                "messages": list(memory[uid])
+                "messages": memory[uid][-10:]
             }
-        ) as res:
-            data = await res.json()
+        )
 
-    if "error" in data:
-        return f"❌ {data['error']}"
+        data = res.json()
 
-    reply = data["choices"][0]["message"]["content"]
-    memory[uid].append({"role": "assistant", "content": reply})
-    return reply
+        if "error" in data:
+            return f"❌ {data['error']}"
 
+        reply = data["choices"][0]["message"]["content"]
+        memory[uid].append({"role": "assistant", "content": reply})
+        return reply
 
-async def ask_mistral(text):
-    async with aiohttp.ClientSession() as session:
-        async with session.post(
+    except:
+        return "❌ حصل خطأ"
+
+def ask_mistral(text):
+    try:
+        res = requests.post(
             "https://api.mistral.ai/v1/chat/completions",
             headers={"Authorization": f"Bearer {MISTRAL_KEY}"},
             json={
                 "model": "mistral-tiny",
                 "messages": [{"role": "user", "content": text}]
             }
-        ) as res:
-            data = await res.json()
+        )
 
-    if "error" in data:
-        return f"❌ {data['error']}"
+        data = res.json()
 
-    return data["choices"][0]["message"]["content"]
+        if "error" in data:
+            return f"❌ {data['error']}"
 
-# ===== AI MENU =====
+        return data["choices"][0]["message"]["content"]
+
+    except:
+        return "❌ حصل خطأ"
+
+# ===== MENUS =====
 def ai_menu():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🧠 DeepSeek", callback_data="deepseek")],
         [InlineKeyboardButton("🔥 Mistral", callback_data="mistral")]
     ])
 
-# ===== ADMIN =====
 def admin_panel():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📊 Users", callback_data="users"),
-         InlineKeyboardButton("🚫 Ban", callback_data="ban")],
-
-        [InlineKeyboardButton("✅ Unban", callback_data="unban"),
-         InlineKeyboardButton("📢 Broadcast", callback_data="broadcast")]
+        [InlineKeyboardButton("📊 Users", callback_data="users")],
+        [InlineKeyboardButton("🚫 Ban", callback_data="ban"),
+         InlineKeyboardButton("✅ Unban", callback_data="unban")],
+        [InlineKeyboardButton("📢 Broadcast", callback_data="broadcast")]
     ])
 
 # ===== START =====
@@ -99,16 +88,26 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = user.id
 
     users.add(uid)
-    save("users.json", users)
 
     if uid in ADMINS:
         await update.message.reply_text("👑 Admin Panel", reply_markup=admin_panel())
         return
 
-    await update.message.reply_text(f"👋 أهلاً بيك يا {user.first_name}\n\n🤖 {BOT_NAME}\nاكتب /ai واختار AI")
+    await update.message.reply_text(f"""
+👋 أهلاً بيك يا {user.first_name}
 
-# ===== CHOOSE AI =====
-async def choose_ai(update: Update, context: ContextTypes.DEFAULT_TYPE):
+👨‍💻 يوسف محمد عبدالماجد  
+🎓 طالب في جامعة ZNU  
+💻 كلية حاسبات و معلومات  
+🤖 قسم الذكاء الاصطناعي  
+
+━━━━━━━━━━━━━━━
+👇 اضغط:
+/start_bot
+""")
+
+# ===== START BOT =====
+async def start_bot(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("اختار AI:", reply_markup=ai_menu())
 
 # ===== BUTTONS =====
@@ -117,10 +116,9 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await q.answer()
     uid = q.from_user.id
 
-    # اختيار AI
     if q.data in ["deepseek", "mistral"]:
         user_ai[uid] = q.data
-        await q.edit_message_text(f"✅ اخترت {q.data}")
+        await q.edit_message_text(f"✅ اخترت {q.data}\nابعت رسالتك")
         return
 
     if uid not in ADMINS:
@@ -152,14 +150,12 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if mode == "ban":
         banned.add(int(update.message.text))
-        save("banned.json", banned)
         await update.message.reply_text("🚫 تم")
         context.user_data["mode"] = None
         return
 
     if mode == "unban":
         banned.discard(int(update.message.text))
-        save("banned.json", banned)
         await update.message.reply_text("✅ تم")
         context.user_data["mode"] = None
         return
@@ -177,36 +173,41 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ai = user_ai.get(uid)
 
     if not ai:
-        return await update.message.reply_text("⚠️ اكتب /ai واختار الأول")
+        return await update.message.reply_text("⚠️ اختار AI الأول /start_bot")
 
     msg = await update.message.reply_text("⏳")
 
+    text = update.message.text
+
     if ai == "deepseek":
-        reply = await ask_deepseek(uid, update.message.text)
+        reply = ask_deepseek(uid, text)
     else:
-        reply = await ask_mistral(update.message.text)
+        reply = ask_mistral(text)
 
     await msg.edit_text(reply)
 
 # ===== PHOTO =====
 async def photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    file = await update.message.photo[-1].get_file()
-    os.makedirs("photos", exist_ok=True)
-    await file.download_to_drive(f"photos/{update.effective_user.id}.jpg")
+    try:
+        await update.message.reply_text("🤖 بحاول افهم الصورة...")
 
-    await update.message.reply_text("📸 اتحفظت")
+        # هنا مؤقت لحد ما نربط AI vision
+        await update.message.reply_text("📸 دي صورة... بس فيه مشكلة في الصور دلوقتي 😅")
+
+    except:
+        await update.message.reply_text("❌ فيه مشكلة في الصور دلوقتي")
 
 # ===== MAIN =====
 def main():
-    app = Application.builder().token(BOT_TOKEN).concurrent_updates(True).build()
+    app = Application.builder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("ai", choose_ai))
+    app.add_handler(CommandHandler("start_bot", start_bot))
     app.add_handler(CallbackQueryHandler(buttons))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle))
     app.add_handler(MessageHandler(filters.PHOTO, photo))
 
-    print("🔥 BOT RUNNING PRO...")
+    print("🔥 BOT RUNNING...")
     app.run_polling()
 
 if __name__ == "__main__":
