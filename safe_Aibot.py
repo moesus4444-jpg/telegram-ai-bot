@@ -31,6 +31,12 @@ def get_memory(uid):
 def ask_deepseek(uid, text):
     try:
         mem = get_memory(uid)
+
+        mem.insert(0, {
+            "role": "system",
+            "content": "اتكلم عربي مصري بس وبلاش أي لغة تانية"
+        })
+
         mem.append({"role": "user", "content": text})
 
         res = requests.post(
@@ -55,6 +61,12 @@ def ask_deepseek(uid, text):
 def ask_mistral(uid, text):
     try:
         mem = get_memory(uid)
+
+        mem.insert(0, {
+            "role": "system",
+            "content": "اتكلم عربي مصري بس وبلاش أي لغة تانية"
+        })
+
         mem.append({"role": "user", "content": text})
 
         res = requests.post(
@@ -82,6 +94,12 @@ def ask_mistral(uid, text):
 def ask_openrouter(uid, text):
     try:
         mem = get_memory(uid)
+
+        mem.insert(0, {
+            "role": "system",
+            "content": "اتكلم عربي مصري بس وبلاش أي لغة تانية"
+        })
+
         mem.append({"role": "user", "content": text})
 
         res = requests.post(
@@ -91,7 +109,7 @@ def ask_openrouter(uid, text):
                 "Content-Type": "application/json"
             },
             json={
-                "model": "meta-llama/llama-3-8b-instruct",
+                "model": "mistralai/mixtral-8x7b-instruct",
                 "messages": mem
             }
         )
