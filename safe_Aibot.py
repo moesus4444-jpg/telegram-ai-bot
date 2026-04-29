@@ -9,6 +9,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 DEEPSEEK_KEY = os.getenv("DEEPSEEK_KEYS")
 MISTRAL_KEY = os.getenv("MISTRAL_KEY")
+OPENROUTER_KEY = os.getenv("OPENROUTER_KEY")
 
 ADMINS = [6157906511]
 
@@ -24,7 +25,7 @@ chat_enabled = True
 def get_memory(uid):
     if uid not in memory:
         memory[uid] = []
-    return memory[uid][-8:]  # limit
+    return memory[uid][-8:]
 
 # ===== AI =====
 def ask_deepseek(uid, text):
@@ -44,7 +45,6 @@ def ask_deepseek(uid, text):
             return f"❌ {data['error']}"
 
         reply = data["choices"][0]["message"]["content"]
-
         memory[uid] = mem + [{"role": "assistant", "content": reply}]
         return reply
 
@@ -72,16 +72,46 @@ def ask_mistral(uid, text):
             return f"❌ {data['error']}"
 
         reply = data["choices"][0]["message"]["content"]
-
         memory[uid] = mem + [{"role": "assistant", "content": reply}]
         return reply
 
     except:
         return "❌ Mistral Error"
 
+
+def ask_openrouter(uid, text):
+    try:
+        mem = get_memory(uid)
+        mem.append({"role": "user", "content": text})
+
+        res = requests.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {OPENROUTER_KEY}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": "meta-llama/llama-3-8b-instruct",
+                "messages": mem
+            }
+        )
+
+        data = res.json()
+
+        if "error" in data:
+            return f"❌ {data['error']}"
+
+        reply = data["choices"][0]["message"]["content"]
+        memory[uid] = mem + [{"role": "assistant", "content": reply}]
+        return reply
+
+    except:
+        return "❌ OpenRouter Error"
+
 # ===== MENUS =====
 def ai_menu():
     return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🚀 OpenRouter", callback_data="openrouter")],
         [InlineKeyboardButton("🔥 Mistral", callback_data="mistral")],
         [InlineKeyboardButton("🧠 DeepSeek", callback_data="deepseek")]
     ])
@@ -132,7 +162,7 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await q.answer()
     uid = q.from_user.id
 
-    if q.data in ["deepseek", "mistral"]:
+    if q.data in ["deepseek", "mistral", "openrouter"]:
         user_ai[uid] = q.data
         await q.edit_message_text(f"✅ اخترت {q.data}\nابعت رسالتك")
         return
@@ -200,8 +230,10 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if ai == "deepseek":
         reply = ask_deepseek(uid, text)
-    else:
+    elif ai == "mistral":
         reply = ask_mistral(uid, text)
+    else:
+        reply = ask_openrouter(uid, text)
 
     await msg.edit_text(reply)
 
