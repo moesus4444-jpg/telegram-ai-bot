@@ -17,6 +17,15 @@ banned = set()
 memory = {}
 user_ai = {}
 
+bot_enabled = True
+chat_enabled = True
+
+# ===== FORMAT =====
+def format_code(text):
+    if "def " in text or "import " in text or "class " in text:
+        return f"```python\n{text}\n```"
+    return text
+
 # ===== AI =====
 def ask_deepseek(uid, text):
     try:
@@ -41,6 +50,7 @@ def ask_deepseek(uid, text):
 
         reply = data["choices"][0]["message"]["content"]
         memory[uid].append({"role": "assistant", "content": reply})
+
         return reply
 
     except:
@@ -79,7 +89,9 @@ def admin_panel():
         [InlineKeyboardButton("📊 Users", callback_data="users")],
         [InlineKeyboardButton("🚫 Ban", callback_data="ban"),
          InlineKeyboardButton("✅ Unban", callback_data="unban")],
-        [InlineKeyboardButton("📢 Broadcast", callback_data="broadcast")]
+        [InlineKeyboardButton("📢 Broadcast", callback_data="broadcast")],
+        [InlineKeyboardButton("🔌 Bot ON/OFF", callback_data="toggle_bot"),
+         InlineKeyboardButton("💬 Chat ON/OFF", callback_data="toggle_chat")]
     ])
 
 # ===== START =====
@@ -112,6 +124,8 @@ async def start_bot(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ===== BUTTONS =====
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global bot_enabled, chat_enabled
+
     q = update.callback_query
     await q.answer()
     uid = q.from_user.id
@@ -127,23 +141,23 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if q.data == "users":
         await q.edit_message_text(f"👥 {len(users)}", reply_markup=admin_panel())
 
-    elif q.data == "ban":
-        context.user_data["mode"] = "ban"
-        await q.edit_message_text("ابعت ID")
+    elif q.data == "toggle_bot":
+        bot_enabled = not bot_enabled
+        await q.edit_message_text(f"Bot: {'ON' if bot_enabled else 'OFF'}", reply_markup=admin_panel())
 
-    elif q.data == "unban":
-        context.user_data["mode"] = "unban"
-        await q.edit_message_text("ابعت ID")
+    elif q.data == "toggle_chat":
+        chat_enabled = not chat_enabled
+        await q.edit_message_text(f"Chat: {'ON' if chat_enabled else 'OFF'}", reply_markup=admin_panel())
 
-    elif q.data == "broadcast":
-        context.user_data["mode"] = "broadcast"
-        await q.edit_message_text("ابعت الرسالة")
+    elif q.data in ["ban", "unban", "broadcast"]:
+        context.user_data["mode"] = q.data
+        await q.edit_message_text("ابعت ID او رسالة")
 
 # ===== HANDLE =====
 async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
 
-    if uid in banned:
+    if uid in banned or not bot_enabled:
         return
 
     mode = context.user_data.get("mode")
@@ -170,12 +184,15 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["mode"] = None
         return
 
+    if not chat_enabled:
+        return
+
     ai = user_ai.get(uid)
 
     if not ai:
         return await update.message.reply_text("⚠️ اختار AI الأول /start_bot")
 
-    msg = await update.message.reply_text("⏳")
+    msg = await update.message.reply_text("⏳ جاري التفكير...")
 
     text = update.message.text
 
@@ -184,18 +201,9 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         reply = ask_mistral(text)
 
-    await msg.edit_text(reply)
+    reply = format_code(reply)
 
-# ===== PHOTO =====
-async def photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        await update.message.reply_text("🤖 بحاول افهم الصورة...")
-
-        # هنا مؤقت لحد ما نربط AI vision
-        await update.message.reply_text("📸 دي صورة... بس فيه مشكلة في الصور دلوقتي 😅")
-
-    except:
-        await update.message.reply_text("❌ فيه مشكلة في الصور دلوقتي")
+    await msg.edit_text(reply, parse_mode="Markdown")
 
 # ===== MAIN =====
 def main():
@@ -205,9 +213,8 @@ def main():
     app.add_handler(CommandHandler("start_bot", start_bot))
     app.add_handler(CallbackQueryHandler(buttons))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle))
-    app.add_handler(MessageHandler(filters.PHOTO, photo))
 
-    print("🔥 BOT RUNNING...")
+    print("🔥 BOT RUNNING FINAL...")
     app.run_polling()
 
 if __name__ == "__main__":
