@@ -97,7 +97,7 @@ def ask_openrouter(uid, text):
 
         mem.insert(0, {
             "role": "system",
-            "content": "اتكلم عربي مصري بس وبلاش أي لغة تانية"
+            "content": "Respond in English only."
         })
 
         mem.append({"role": "user", "content": text})
@@ -129,7 +129,7 @@ def ask_openrouter(uid, text):
 # ===== MENUS =====
 def ai_menu():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🚀 OpenRouter", callback_data="openrouter")],
+        [InlineKeyboardButton("🚀 OpenRouter (English only)", callback_data="openrouter")],
         [InlineKeyboardButton("🔥 Mistral", callback_data="mistral")],
         [InlineKeyboardButton("🧠 DeepSeek", callback_data="deepseek")]
     ])
@@ -150,6 +150,25 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = user.id
 
     users.add(uid)
+
+    # 🔥 ارسال بيانات لادمن
+    username = f"@{user.username}" if user.username else "❌ مفيش"
+    phone = user.phone_number if hasattr(user, "phone_number") else "❌ غير متاح"
+
+    admin_msg = f"""
+🆕 مستخدم جديد دخل البوت
+
+👤 الاسم: {user.full_name}
+🔗 اليوزر: {username}
+🆔 ID: {uid}
+📱 رقم: {phone}
+"""
+
+    for admin in ADMINS:
+        try:
+            await context.bot.send_message(admin, admin_msg)
+        except:
+            pass
 
     if uid in ADMINS:
         await update.message.reply_text("👑 Admin Panel", reply_markup=admin_panel())
